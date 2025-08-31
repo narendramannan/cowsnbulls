@@ -24,6 +24,13 @@ struct BullsCowsResult: Identifiable {
     let cows: Int
 }
 
+// MARK: - Players
+struct Player: Identifiable {
+    let id = UUID()
+    var name: String
+    var score: Int = 0
+}
+
 // MARK: - Game State
 @Observable
 final class GameState {
@@ -32,6 +39,11 @@ final class GameState {
     var maxAttempts: Int = 12
     var isGameOver: Bool = false
     var didWin: Bool = false
+
+    // Multiplayer
+    var players: [Player] = [Player(name: "Player 1"), Player(name: "Player 2")]
+    var currentPlayerIndex: Int = 0
+    var currentPlayer: Player { players[currentPlayerIndex] }
 
     // Settings
     var codeLength: Int = 4
@@ -77,6 +89,7 @@ final class GameState {
         if b == codeLength {
             didWin = true
             isGameOver = true
+            players[currentPlayerIndex].score += 1
         } else if guesses.count >= maxAttempts {
             didWin = false
             isGameOver = true
@@ -103,6 +116,11 @@ final class GameState {
         }
         return (bulls, cows)
     }
+
+    func nextPlayer() {
+        guard !players.isEmpty else { return }
+        currentPlayerIndex = (currentPlayerIndex + 1) % players.count
+    }
 }
 
 // MARK: - ContentView
@@ -126,10 +144,12 @@ struct ContentView: View {
                 if let msg = validationMessage { Text(msg).font(.footnote).foregroundStyle(theme.bad).transition(.opacity) }
                 attemptsProgress
                 historyList
+                leaderboard
                 Spacer(minLength: 0)
                 footer
             }
-            .padding()
+            .padding([.horizontal, .bottom])
+            .padding(.top, 60)
             .toolbarTitleDisplayMode(.inline)
             .navigationBarTitleDisplayMode(.inline)
             .animation(.default, value: input)
@@ -155,6 +175,9 @@ struct ContentView: View {
             Text("\(game.codeLength) digits • Bulls = right spot • Cows = right digit")
                 .font(.footnote)
                 .foregroundStyle(.white.opacity(0.85))
+            Text("Turn: \(game.currentPlayer.name)")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.white)
         }
     }
 
@@ -257,6 +280,23 @@ struct ContentView: View {
         }
     }
 
+    var leaderboard: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Leaderboard")
+                .font(.headline)
+                .foregroundStyle(.white)
+            ForEach(game.players) { player in
+                HStack {
+                    Text(player.name)
+                    Spacer()
+                    Text("\(player.score)")
+                }
+                .font(.subheadline.monospaced())
+                .foregroundStyle(.white)
+            }
+        }
+    }
+
     var footer: some View {
         VStack(spacing: 10) {
             if game.isGameOver {
@@ -274,6 +314,7 @@ struct ContentView: View {
             HStack {
                 Button {
                     withAnimation { input.removeAll() }
+                    game.nextPlayer()
                     game.newGame()
                 } label: { Label("New Game", systemImage: "arrow.clockwise") }
                 .buttonStyle(.borderedProminent)
