@@ -1,11 +1,22 @@
-// Bulls & Cows — SwiftUI Starter by ChatGPT
-// Xcode 15+ • iOS 17+ • Swift 5.9
-// Create a new iOS App (SwiftUI) project and replace ContentView.swift with this file's content.
+// Bulls & Cows — Kid‑Friendly Edition (SwiftUI)
+// Drop this into ContentView.swift. Keep Xcode’s default cowsnbullsApp.swift as @main.
+// iOS 17+ / Xcode 15+
 
 import SwiftUI
 import Observation
+import UIKit
 
-// MARK: - Game Logic
+// MARK: - Theme
+struct KidTheme {
+    let gradient = LinearGradient(colors: [Color(.systemTeal), Color(.systemMint), Color(.systemYellow)], startPoint: .topLeading, endPoint: .bottomTrailing)
+    let tile = Color.white.opacity(0.9)
+    let accent = Color.orange
+    let good = Color.green
+    let warn = Color.orange
+    let bad  = Color.red
+}
+
+// MARK: - Game Result Row
 struct BullsCowsResult: Identifiable {
     let id = UUID()
     let guess: String
@@ -13,6 +24,7 @@ struct BullsCowsResult: Identifiable {
     let cows: Int
 }
 
+// MARK: - Game State
 @Observable
 final class GameState {
     var secret: String = ""
@@ -24,6 +36,7 @@ final class GameState {
     // Settings
     var codeLength: Int = 4
     var allowRepeats: Bool = false
+    var kidMode: Bool = true // default ON for this edition
 
     init() { newGame() }
 
@@ -40,7 +53,6 @@ final class GameState {
     static func generateSecret(length: Int, allowRepeats: Bool) -> String {
         var digits = Array("0123456789")
         if !allowRepeats {
-            // Ensure first digit isn't 0 for nicer UX
             let firstPool = Array("123456789")
             var code = String(firstPool.randomElement()!)
             digits.removeAll(where: { $0 == code.first! })
@@ -50,18 +62,17 @@ final class GameState {
             }
             return code
         } else {
-            // Repeats allowed; first digit can be 0 or not — keep it simple
             return String((0..<length).map { _ in Array("0123456789").randomElement()! })
         }
     }
 
-    func submit(guess: String) {
-        guard !isGameOver else { return }
-        guard validate(guess: guess) == nil else { return }
+    func submit(guess: String) -> (Int, Int)? {
+        guard !isGameOver else { return nil }
+        guard validate(guess: guess) == nil else { return nil }
 
         let (b, c) = Self.score(guess: guess, secret: secret)
         let result = BullsCowsResult(guess: guess, bulls: b, cows: c)
-        guesses.insert(result, at: 0)
+        withAnimation(.spring) { guesses.insert(result, at: 0) }
 
         if b == codeLength {
             didWin = true
@@ -70,14 +81,14 @@ final class GameState {
             didWin = false
             isGameOver = true
         }
+        return (b, c)
     }
 
     func validate(guess: String) -> String? {
         if guess.count != codeLength { return "Enter exactly \(codeLength) digits." }
-        if !CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: guess)) {
-            return "Digits only." }
-        if !allowRepeats && Set(guess).count != guess.count { return "No repeating digits." }
-        if guess.first == "0" && !allowRepeats { return "First digit can't be 0." }
+        if !CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: guess)) { return "Digits only." }
+        if !allowRepeats && Set(guess).count != guess.count { return "No repeats." }
+        if guess.first == "0" && !allowRepeats { return "No leading 0." }
         return nil
     }
 
@@ -86,7 +97,6 @@ final class GameState {
         var cows = 0
         let g = Array(guess)
         let s = Array(secret)
-
         for i in 0..<s.count {
             if g[i] == s[i] { bulls += 1 }
             else if s.contains(g[i]) { cows += 1 }
@@ -95,77 +105,113 @@ final class GameState {
     }
 }
 
-// MARK: - UI
+// MARK: - ContentView
 struct ContentView: View {
-    @State private var input: String = ""
-    @State private var validationMessage: String? = nil
-    @State private var showSettings = false
-    @State private var haptic = UIImpactFeedbackGenerator(style: .light)
-
     @State private var game = GameState()
+    @State private var input: String = ""
+    @State private var showSettings = false
+    @State private var validationMessage: String? = nil
+    @State private var winningPulse = false
+
+    let theme = KidTheme()
 
     var body: some View {
-        NavigationStack {
+        ZStack {
+            theme.gradient.ignoresSafeArea()
             VStack(spacing: 16) {
                 header
-                inputRow
-                if let msg = validationMessage { Text(msg).foregroundStyle(.red).font(.footnote) }
+                mascot
+                guessTiles
+                keypad
+                if let msg = validationMessage { Text(msg).font(.footnote).foregroundStyle(theme.bad).transition(.opacity) }
                 attemptsProgress
                 historyList
                 Spacer(minLength: 0)
                 footer
             }
             .padding()
-            .navigationTitle("Bulls & Cows")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showSettings.toggle() } label: { Image(systemName: "gearshape") }
-                }
-            }
-            .sheet(isPresented: $showSettings) { settingsSheet }
+            .toolbarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.inline)
+            .animation(.default, value: input)
         }
-        .onAppear { haptic.prepare() }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showSettings = true } label: { Image(systemName: "gearshape.fill") }
+            }
+        }
+        .sheet(isPresented: $showSettings) { settingsSheet }
+        .overlay(alignment: .top) { topBanner }
+        .overlay { if game.didWin { ConfettiView(key: UUID()) } }
+        .navigationTitle("Bulls & Cows")
     }
 
     // MARK: - Subviews
     var header: some View {
         VStack(spacing: 6) {
-            Text("Guess the secret code")
-                .font(.title2.weight(.semibold))
-            Text("\(game.codeLength) unique digits. Bulls = right digit & place. Cows = right digit, wrong place.")
+            Text(game.kidMode ? "Crack the Secret Code!" : "Guess the secret code")
+                .font(.title2.weight(.bold))
+                .foregroundStyle(.white)
+                .shadow(radius: 4)
+            Text("\(game.codeLength) digits • Bulls = right spot • Cows = right digit")
                 .font(.footnote)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+                .foregroundStyle(.white.opacity(0.85))
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 4)
     }
 
-    var inputRow: some View {
+    var mascot: some View {
         HStack(spacing: 12) {
-            TextField("Your guess", text: $input)
-                .textInputAutocapitalization(.never)
-                .keyboardType(.numberPad)
-                .disableAutocorrection(true)
-                .font(.title3.monospaced())
-                .padding(.horizontal)
-                .padding(.vertical, 10)
-                .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14))
-                .onChange(of: input) { _, newVal in
-                    // keep digits only & trim to length
-                    let digitsOnly = newVal.filter { $0.isNumber }
-                    input = String(digitsOnly.prefix(game.codeLength))
-                    validationMessage = nil
-                }
-
-            Button(action: onSubmit) {
-                Image(systemName: "paperplane.fill")
-                    .font(.title3.weight(.semibold))
-                    .padding(12)
-                    .background(Color.accentColor.opacity(0.15), in: Circle())
+            Text("🐮🐂")
+                .font(.system(size: game.kidMode ? 44 : 28))
+                .scaleEffect(game.didWin ? 1.2 : 1.0)
+                .animation(.spring(response: 0.5, dampingFraction: 0.5), value: game.didWin)
+            if game.kidMode {
+                Text(game.didWin ? "Yay! You did it!" : "Guess the number!")
+                    .font(.headline)
+                    .foregroundStyle(.white)
             }
-            .disabled(game.isGameOver)
         }
+    }
+
+    var guessTiles: some View {
+        HStack(spacing: 8) {
+            ForEach(0..<game.codeLength, id: \.self) { i in
+                let char = i < input.count ? String(Array(input)[i]) : "?"
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(theme.tile)
+                    .overlay(Text(char).font(.title2.monospaced()).foregroundStyle(.black.opacity(0.8)))
+                    .frame(height: 52)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(.white.opacity(0.4), lineWidth: 1)
+                    )
+                    .shadow(radius: 3)
+                    .scaleEffect(i < input.count ? 1.02 : 1)
+                    .animation(.spring, value: input)
+            }
+        }
+    }
+
+    var keypad: some View {
+        VStack(spacing: 10) {
+            let rows: [[String]] = [["1","2","3"],["4","5","6"],["7","8","9"],["⌫","0","⏎"]]
+            ForEach(0..<rows.count, id: \.self) { r in
+                HStack(spacing: 10) {
+                    ForEach(rows[r], id: \.self) { label in
+                        Button { keyTap(label) } label: {
+                            RoundedRectangle(cornerRadius: 16)
+                                .fill(.white.opacity(0.9))
+                                .overlay(
+                                    Text(label).font(.title3.weight(.semibold)).foregroundStyle(.black)
+                                )
+                                .frame(height: 54)
+                                .shadow(radius: 2)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.top, 6)
     }
 
     var attemptsProgress: some View {
@@ -173,35 +219,40 @@ struct ContentView: View {
         let total = game.maxAttempts
         return HStack {
             ProgressView(value: Double(used), total: Double(total))
-                .tint(game.isGameOver ? (game.didWin ? .green : .red) : .accentColor)
+                .tint(game.isGameOver ? (game.didWin ? theme.good : theme.bad) : theme.accent)
             Text("\(used)/\(total)")
-                .font(.footnote.monospaced())
-                .foregroundStyle(.secondary)
+                .font(.footnote.monospaced()).foregroundStyle(.white.opacity(0.9))
         }
-        .padding(.top, 4)
     }
 
     var historyList: some View {
         VStack(alignment: .leading, spacing: 8) {
             if game.guesses.isEmpty {
                 ContentUnavailableView(
-                    "No guesses yet",
+                    game.kidMode ? "No guesses yet" : "No guesses yet",
                     systemImage: "lightbulb",
-                    description: Text("Try a number like 1234 or 4271.")
+                    description: Text(game.kidMode ? "Tap numbers and press ⏎ to try!" : "Try a number like 1234.")
                 )
-                .padding(.top, 16)
+                .padding(.top, 12)
             } else {
                 List(game.guesses) { r in
-                    HStack {
+                    HStack(spacing: 12) {
                         Text(r.guess).font(.body.monospaced())
                         Spacer()
-                        Label("\(r.bulls)", systemImage: "circle.fill").labelStyle(.titleAndIcon).foregroundStyle(.green)
-                        Label("\(r.cows)", systemImage: "circle").labelStyle(.titleAndIcon).foregroundStyle(.orange)
+                        Label("\(r.bulls)", systemImage: "checkmark.seal.fill")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(theme.good)
+                            .scaleEffect(r.bulls > 0 ? 1.1 : 1)
+                            .animation(.spring, value: r.bulls)
+                        Label("\(r.cows)", systemImage: "wand.and.stars")
+                            .foregroundStyle(theme.warn)
+                            .scaleEffect(r.cows > 0 ? 1.08 : 1)
+                            .animation(.spring, value: r.cows)
                     }
                     .listRowBackground(Color.clear)
                 }
                 .listStyle(.plain)
-                .frame(maxHeight: 320)
+                .frame(maxHeight: 280)
             }
         }
     }
@@ -210,34 +261,31 @@ struct ContentView: View {
         VStack(spacing: 10) {
             if game.isGameOver {
                 VStack(spacing: 4) {
-                    Text(game.didWin ? "You cracked it!" : "Out of attempts")
+                    Text(game.didWin ? "You cracked it! 🎉" : "Nice try!")
                         .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white)
                     Text("Secret was \(game.secret)")
                         .font(.footnote.monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.white.opacity(0.9))
                 }
+                .transition(.scale)
             }
 
             HStack {
-                Button(role: .cancel) {
+                Button {
                     withAnimation { input.removeAll() }
                     game.newGame()
-                } label: {
-                    Label("New Game", systemImage: "arrow.clockwise")
-                }
+                } label: { Label("New Game", systemImage: "arrow.clockwise") }
+                .buttonStyle(.borderedProminent)
 
                 Spacer()
 
-                Menu {
-                    Picker("Attempts", selection: $game.maxAttempts) {
-                        ForEach([8, 10, 12, 14, 16], id: \.self) { Text("\($0) attempts").tag($0) }
-                    }
-                    .pickerStyle(.inline)
-                } label: {
-                    Label("Attempts: \(game.maxAttempts)", systemImage: "flag")
-                }
+                Button {
+                    giveHint()
+                } label: { Label("Hint", systemImage: "lightbulb.fill") }
+                .buttonStyle(.bordered)
+                .disabled(game.isGameOver)
             }
-            .font(.callout)
         }
     }
 
@@ -245,41 +293,107 @@ struct ContentView: View {
         NavigationStack {
             Form {
                 Section("Code") {
-                    Stepper(value: $game.codeLength, in: 3...6, step: 1, onEditingChanged: { _ in }) {
-                        Text("Length: \(game.codeLength)")
-                    }
+                    Stepper(value: $game.codeLength, in: 3...6) { Text("Length: \(game.codeLength)") }
                     Toggle("Allow repeating digits", isOn: $game.allowRepeats)
                 }
-                Section(footer: Text("Changing settings starts a fresh game.")) {
-                    Button("Apply & Start New Game") {
-                        input.removeAll()
-                        game.newGame()
+                Section("Play Style") {
+                    Toggle("Kid Mode (bigger text, mascot)", isOn: $game.kidMode)
+                    Picker("Attempts", selection: $game.maxAttempts) {
+                        ForEach([8,10,12,14,16], id: \.self) { Text("\($0)").tag($0) }
                     }
+                }
+                Section(footer: Text("Applying starts a new game.")) {
+                    Button("Apply & New Game") { input.removeAll(); game.newGame() }
                 }
             }
             .navigationTitle("Settings")
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) { Button("Done") { showSettings = false } }
-            }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showSettings = false } } }
         }
         .presentationDetents([.medium, .large])
     }
 
-    // MARK: - Actions
-    func onSubmit() {
-        if let error = game.validate(guess: input) {
-            validationMessage = error
-            UIImpactFeedbackGenerator(style: .rigid).impactOccurred()
-            return
+    var topBanner: some View {
+        HStack(spacing: 8) {
+            if game.kidMode { Text("🐮 Bulls = right spot  •  🐓 Cows = right digit") }
         }
-        haptic.impactOccurred()
-        withAnimation { game.submit(guess: input) }
-        input.removeAll()
+        .font(.footnote.weight(.medium))
+        .padding(8)
+        .background(.white.opacity(0.25), in: Capsule())
+        .padding(.top, 6)
+    }
+
+    // MARK: - Actions
+    func keyTap(_ label: String) {
+        validationMessage = nil
+        switch label {
+        case "⏎":
+            if let err = game.validate(guess: input) { validationMessage = err; return }
+            let _ = game.submit(guess: input)
+            input.removeAll()
+        case "⌫":
+            if !input.isEmpty { input.removeLast() }
+        default:
+            guard input.count < game.codeLength else { return }
+            guard CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: label)) else { return }
+            if !game.allowRepeats && input.contains(label) { validationMessage = "No repeats"; return }
+            if input.isEmpty && label == "0" && !game.allowRepeats { validationMessage = "No leading 0"; return }
+            input.append(label)
+        }
+    }
+
+    func giveHint() {
+        guard !game.isGameOver else { return }
+        // Simple hint: reveal one digit from the secret (not position). Costs one attempt (adds a dummy guess row with 0/0 and hint text via validation).
+        if let d = game.secret.randomElement() {
+            validationMessage = "Hint: the number contains \(d)"
+            // Count it as using one attempt without adding a guess; we’ll add an empty row for history clarity.
+            let hintRow = BullsCowsResult(guess: "Hint: \(d)", bulls: 0, cows: 0)
+            withAnimation { game.guesses.insert(hintRow, at: 0) }
+            if game.guesses.count >= game.maxAttempts { game.isGameOver = true; game.didWin = false }
+        }
+    }
+}
+
+// MARK: - Confetti (UIKit CAEmitterLayer)
+struct ConfettiView: UIViewRepresentable {
+    let key: UUID // change value to retrigger
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { emit(on: view) }
+        return view
+    }
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    private func emit(on view: UIView) {
+        let emitter = CAEmitterLayer()
+        emitter.emitterPosition = CGPoint(x: view.bounds.midX, y: -4)
+        emitter.emitterShape = .line
+        emitter.emitterSize = CGSize(width: view.bounds.width, height: 2)
+
+        func cell(_ color: UIColor) -> CAEmitterCell {
+            let c = CAEmitterCell()
+            c.birthRate = 16
+            c.lifetime = 4
+            c.velocity = 160
+            c.velocityRange = 40
+            c.emissionLongitude = .pi
+            c.emissionRange = .pi / 8
+            c.spin = 3
+            c.spinRange = 4
+            c.scale = 0.6
+            c.scaleRange = 0.3
+            c.color = color.cgColor
+            c.contents = UIImage(systemName: "circle.fill")?.withTintColor(color, renderingMode: .alwaysOriginal).cgImage
+            return c
+        }
+        emitter.emitterCells = [cell(.systemPink), cell(.systemTeal), cell(.systemYellow), cell(.systemOrange), cell(.systemGreen)]
+
+        view.layer.addSublayer(emitter)
+        // Stop after a burst
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { emitter.birthRate = 0 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { emitter.removeFromSuperlayer() }
     }
 }
 
 // MARK: - Preview
-#Preview {
-    ContentView()
-}
-
+#Preview { ContentView() }
